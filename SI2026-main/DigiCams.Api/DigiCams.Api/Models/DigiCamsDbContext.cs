@@ -38,7 +38,7 @@ public partial class DigiCamsDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("PK__Orders__3214EC076927A3B3");
 
             entity.Property(e => e.OrderDate)
-                .HasDefaultValueSql("(getdate())")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("datetime");
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(18, 2)");
 
