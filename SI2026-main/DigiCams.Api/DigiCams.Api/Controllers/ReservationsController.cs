@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -16,7 +17,9 @@ namespace DigiCams.Api.Controllers
             _context = context;
         }
 
-        // GET: api/reservations (Admin/Seller only)
+        // GET: api/reservations
+        // PRISTUP: Prodavac, Admin
+        [Authorize(Roles = "Seller,Admin")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Reservation>>> GetAllReservations()
         {
@@ -28,16 +31,13 @@ namespace DigiCams.Api.Controllers
         }
 
         // GET: api/reservations/my
+        // PRISTUP: Registrovani korisnik, Prodavac, Admin
+        [Authorize]
         [HttpGet("my")]
         public async Task<ActionResult<IEnumerable<Reservation>>> GetMyReservations()
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized();
-            }
-
-            var userId = int.Parse(userIdClaim.Value);
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
 
             return await _context.Reservations
                 .Where(r => r.UserId == userId)
@@ -47,53 +47,58 @@ namespace DigiCams.Api.Controllers
         }
 
         // GET: api/reservations/availability/5
+        // PRISTUP: Svi — Guest moze vidjeti kalendar dostupnosti
+        [AllowAnonymous]
         [HttpGet("availability/{productId}")]
-        public async Task<ActionResult<object>> CheckAvailability(int productId, [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+        public async Task<ActionResult<object>> CheckAvailability(
+            int productId, [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
         {
             var reservations = await _context.Reservations
                 .Where(r => r.ProductId == productId &&
-                           r.Status != "Cancelled" &&
-                           ((r.StartDate <= endDate && r.EndDate >= startDate)))
+                            r.Status != "Cancelled" &&
+                            r.StartDate <= endDate && r.EndDate >= startDate)
                 .ToListAsync();
 
-            return Ok(new
-            {
-                isAvailable = !reservations.Any(),
-                conflictingReservations = reservations
-            });
+            return Ok(new { isAvailable = !reservations.Any(), conflictingReservations = reservations });
         }
 
         // POST: api/reservations
+        // PRISTUP: Registrovani korisnik (User), Admin — Guest NE MOZE
+        [Authorize(Roles = "User,Admin")]
         [HttpPost]
-        public async Task<ActionResult<Reservation>> CreateReservation(CreateReservationDto reservationDto)
+        public async Task<ActionResult<Reservation>> CreateReservation(CreateReservationDto dto)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized();
-            }
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
 
-            var userId = int.Parse(userIdClaim.Value);
-
-            // Check if product is available
             var hasConflict = await _context.Reservations
-                .AnyAsync(r => r.ProductId == reservationDto.ProductId &&
-                              r.Status != "Cancelled" &&
-                              ((r.StartDate <= reservationDto.EndDate && r.EndDate >= reservationDto.StartDate)));
+                .AnyAsync(r => r.ProductId == dto.ProductId &&
+                               r.Status != "Cancelled" &&
+                               r.StartDate <= dto.EndDate && r.EndDate >= dto.StartDate);
 
             if (hasConflict)
-            {
                 return BadRequest(new { message = "Proizvod nije dostupan u odabranom periodu" });
-            }
+
+            var product = await _context.Products.FindAsync(dto.ProductId);
+            if (product == null) return NotFound(new { message = "Proizvod nije prona?en" });
+            if (product.IsForRent != true || product.PriceRentPerDay == null)
+                return BadRequest(new { message = "Ovaj proizvod nije dostupan za iznajmljivanje" });
+
+            var nights = (int)(dto.EndDate - dto.StartDate).TotalDays;
+            if (nights <= 0)
+                return BadRequest(new { message = "EndDate mora biti posle StartDate" });
+
+            // Cijena se racuna na serveru, ne prima od klijenta!
+            var totalPrice = nights * product.PriceRentPerDay.Value;
 
             var reservation = new Reservation
             {
-                UserId = userId,
-                ProductId = reservationDto.ProductId,
-                StartDate = reservationDto.StartDate,
-                EndDate = reservationDto.EndDate,
-                TotalPrice = reservationDto.TotalPrice,
-                Status = "Active"
+                UserId = userId.Value,
+                ProductId = dto.ProductId,
+                StartDate = dto.StartDate,
+                EndDate = dto.EndDate,
+                TotalPrice = totalPrice,
+                Status = "Pending"
             };
 
             _context.Reservations.Add(reservation);
@@ -102,34 +107,58 @@ namespace DigiCams.Api.Controllers
             return CreatedAtAction(nameof(GetMyReservations), new { id = reservation.Id }, reservation);
         }
 
-        // PUT: api/reservations/5/cancel
+        // PUT: api/reservations/{id}/cancel
+        // PRISTUP: Registrovani korisnik (samo svoju), Admin (bilo koju)
+        [Authorize(Roles = "User,Admin")]
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelReservation(int id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized();
-            }
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
 
-            var userId = int.Parse(userIdClaim.Value);
             var reservation = await _context.Reservations.FindAsync(id);
+            if (reservation == null) return NotFound();
 
-            if (reservation == null)
-            {
-                return NotFound();
-            }
+            var isAdmin = User.IsInRole("Admin");
 
-            // Check if user owns this reservation
-            if (reservation.UserId != userId)
-            {
+            if (!isAdmin && reservation.UserId != userId)
                 return Forbid();
-            }
+
+            // Pravilo platforme: ne moze se otkazati manje od 24h prije pocetka
+            if (!isAdmin && reservation.StartDate <= DateTime.UtcNow.AddHours(24))
+                return BadRequest(new { message = "Rezervacija se ne moze otkazati manje od 24h pre pocetka" });
+
+            if (reservation.Status == "Cancelled")
+                return BadRequest(new { message = "Rezervacija je vec otkazana" });
 
             reservation.Status = "Cancelled";
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        // PUT: api/reservations/{id}/confirm
+        // PRISTUP: Prodavac, Admin — potvrdjuju rezervacije korisnika
+        [Authorize(Roles = "Seller,Admin")]
+        [HttpPut("{id}/confirm")]
+        public async Task<IActionResult> ConfirmReservation(int id)
+        {
+            var reservation = await _context.Reservations.FindAsync(id);
+            if (reservation == null) return NotFound();
+
+            if (reservation.Status != "Pending")
+                return BadRequest(new { message = "Samo Pending rezervacije mogu biti potvrdene" });
+
+            reservation.Status = "Confirmed";
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        private int? GetUserId()
+        {
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier);
+            return claim != null ? int.Parse(claim.Value) : null;
         }
     }
 
@@ -138,6 +167,6 @@ namespace DigiCams.Api.Controllers
         public int ProductId { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
-        public decimal TotalPrice { get; set; }
+        // TotalPrice se NE prima od klijenta — racuna se na serveru
     }
 }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,13 +22,14 @@ namespace DigiCams.Api.Controllers
             _configuration = configuration;
         }
 
+        // POST: api/auth/register
+        // PRISTUP: Guest (javno dostupno)
+        [AllowAnonymous]
         [HttpPost("register")]
         public async Task<ActionResult> Register(RegisterDto registerDto)
         {
             if (await _context.Users.AnyAsync(u => u.Email == registerDto.Email))
-            {
                 return BadRequest(new { message = "Email već postoji" });
-            }
 
             var user = new User
             {
@@ -35,7 +37,7 @@ namespace DigiCams.Api.Controllers
                 LastName = registerDto.LastName,
                 Email = registerDto.Email,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password),
-                Role = registerDto.Role ?? "User"
+                Role = "User" // Uvijek "User" — korisnik ne može sam birati rolu!
             };
 
             _context.Users.Add(user);
@@ -44,29 +46,23 @@ namespace DigiCams.Api.Controllers
             return Ok(new { message = "Registracija uspešna" });
         }
 
+        // POST: api/auth/login
+        // PRISTUP: Guest (javno dostupno)
+        [AllowAnonymous]
         [HttpPost("login")]
         public async Task<ActionResult> Login(LoginDto loginDto)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginDto.Email);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
-            {
                 return Unauthorized(new { message = "Pogrešan email ili lozinka" });
-            }
 
             var token = GenerateJwtToken(user);
 
             return Ok(new
             {
                 token,
-                user = new
-                {
-                    user.Id,
-                    user.FirstName,
-                    user.LastName,
-                    user.Email,
-                    user.Role
-                }
+                user = new { user.Id, user.FirstName, user.LastName, user.Email, user.Role }
             });
         }
 
@@ -83,10 +79,11 @@ namespace DigiCams.Api.Controllers
                     new Claim(ClaimTypes.Role, user.Role)
                 }),
                 Expires = DateTime.UtcNow.AddDays(7),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+                SigningCredentials = new SigningCredentials(
+                    new SymmetricSecurityKey(key),
+                    SecurityAlgorithms.HmacSha256Signature)
             };
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            return tokenHandler.WriteToken(token);
+            return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
         }
     }
 
@@ -96,7 +93,7 @@ namespace DigiCams.Api.Controllers
         public string LastName { get; set; } = null!;
         public string Email { get; set; } = null!;
         public string Password { get; set; } = null!;
-        public string? Role { get; set; }
+        // NEMA Role polja — korisnik ne može sam sebi dodijeliti rolu
     }
 
     public class LoginDto

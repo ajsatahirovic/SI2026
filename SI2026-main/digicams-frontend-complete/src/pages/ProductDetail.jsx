@@ -248,7 +248,11 @@ const ProductDetail = () => {
                 {Number(product.priceSale).toLocaleString()}&thinsp;<span className="text-lg">RSD</span>
               </p>
               <button
-                onClick={() => { addToCart(product); showToast(`${product.name} dodat u korpu`); }}
+                onClick={() => {
+                  if (!isAuthenticated()) { navigate('/login'); return; }
+                  addToCart(product);
+                  showToast(`${product.name} dodat u korpu`);
+                }}
                 className="btn-clay w-full justify-center"
               >
                 <ShoppingBag className="w-3.5 h-3.5" /> Dodaj u korpu

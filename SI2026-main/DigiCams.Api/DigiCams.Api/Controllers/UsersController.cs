@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -10,133 +11,80 @@ namespace DigiCams.Api.Controllers
     public class UsersController : ControllerBase
     {
         private readonly DigiCamsDbContext _context;
+        public UsersController(DigiCamsDbContext context) { _context = context; }
 
-        public UsersController(DigiCamsDbContext context)
-        {
-            _context = context;
-        }
-
-        // GET: api/users (Admin only)
+        // GET: api/users — PRISTUP: Admin jedini moze upravljati svim korisnicima
+        [Authorize(Roles = "Admin")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetUsers()
         {
             var users = await _context.Users
-                .Select(u => new
-                {
-                    u.Id,
-                    u.FirstName,
-                    u.LastName,
-                    u.Email,
-                    u.Role
-                })
+                .Select(u => new { u.Id, u.FirstName, u.LastName, u.Email, u.Role })
                 .ToListAsync();
-
             return Ok(users);
         }
 
-        // GET: api/users/5
+        // GET: api/users/5 — PRISTUP: Admin
+        [Authorize(Roles = "Admin")]
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetUser(int id)
         {
             var user = await _context.Users
                 .Where(u => u.Id == id)
-                .Select(u => new
-                {
-                    u.Id,
-                    u.FirstName,
-                    u.LastName,
-                    u.Email,
-                    u.Role
-                })
+                .Select(u => new { u.Id, u.FirstName, u.LastName, u.Email, u.Role })
                 .FirstOrDefaultAsync();
-
-            if (user == null)
-            {
-                return NotFound();
-            }
-
+            if (user == null) return NotFound();
             return user;
         }
 
-        // PUT: api/users/profile
+        // PUT: api/users/profile — PRISTUP: Registrovani korisnik (svoje podatke)
+        [Authorize]
         [HttpPut("profile")]
         public async Task<IActionResult> UpdateProfile(UpdateProfileDto profileDto)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized();
-            }
-
-            var userId = int.Parse(userIdClaim.Value);
+            var claim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (claim == null) return Unauthorized();
+            var userId = int.Parse(claim.Value);
             var user = await _context.Users.FindAsync(userId);
-
-            if (user == null)
-            {
-                return NotFound();
-            }
+            if (user == null) return NotFound();
 
             user.FirstName = profileDto.FirstName;
             user.LastName = profileDto.LastName;
             user.Email = profileDto.Email;
-
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // PUT: api/users/5
+        // PUT: api/users/5 — PRISTUP: Admin (moze mijenjati rolu korisnika)
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateUser(int id, UpdateUserDto userDto)
         {
             var user = await _context.Users.FindAsync(id);
-            if (user == null)
-            {
-                return NotFound();
-            }
+            if (user == null) return NotFound();
 
             user.FirstName = userDto.FirstName;
             user.LastName = userDto.LastName;
             user.Email = userDto.Email;
-            if (!string.IsNullOrEmpty(userDto.Role))
-            {
-                user.Role = userDto.Role;
-            }
+            if (!string.IsNullOrEmpty(userDto.Role)) user.Role = userDto.Role;
 
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // DELETE: api/users/5 (Admin only)
+        // DELETE: api/users/5 — PRISTUP: Admin jedini moze brisati korisnike
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
             var user = await _context.Users.FindAsync(id);
-            if (user == null)
-            {
-                return NotFound();
-            }
-
+            if (user == null) return NotFound();
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
     }
 
-    public class UpdateProfileDto
-    {
-        public string FirstName { get; set; } = null!;
-        public string LastName { get; set; } = null!;
-        public string Email { get; set; } = null!;
-    }
-
-    public class UpdateUserDto
-    {
-        public string FirstName { get; set; } = null!;
-        public string LastName { get; set; } = null!;
-        public string Email { get; set; } = null!;
-        public string? Role { get; set; }
-    }
+    public class UpdateProfileDto { public string FirstName { get; set; } = null!; public string LastName { get; set; } = null!; public string Email { get; set; } = null!; }
+    public class UpdateUserDto { public string FirstName { get; set; } = null!; public string LastName { get; set; } = null!; public string Email { get; set; } = null!; public string? Role { get; set; } }
 }

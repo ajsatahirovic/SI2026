@@ -5,6 +5,7 @@ import { CartProvider } from './context/CartContext';
 // Layout Components
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
 import Home from './pages/Home';
@@ -28,26 +29,54 @@ function App() {
             <Navbar />
             <main className="flex-grow">
               <Routes>
-                {/* Public Routes */}
+
+                {/* JAVNE RUTE - Guest moze pristupiti */}
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
-                
-                {/* Product Routes */}
                 <Route path="/products" element={<Products />} />
                 <Route path="/products/:type" element={<Products />} />
                 <Route path="/products/detail/:id" element={<ProductDetail />} />
-                
-                {/* User Routes */}
-                <Route path="/cart" element={<Cart />} />
-                <Route path="/orders" element={<MyOrders />} />
-                <Route path="/reservations" element={<MyReservations />} />
-                <Route path="/profile" element={<Profile />} />
-                
-                {/* Seller/Admin Routes */}
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/dashboard/products/add" element={<ProductForm />} />
-                <Route path="/dashboard/products/edit/:id" element={<ProductForm />} />
+
+                {/* KORISNICKE RUTE - ulogovani korisnik (User, Seller, Admin) */}
+                <Route path="/cart" element={
+                  <ProtectedRoute>
+                    <Cart />
+                  </ProtectedRoute>
+                } />
+                <Route path="/orders" element={
+                  <ProtectedRoute>
+                    <MyOrders />
+                  </ProtectedRoute>
+                } />
+                <Route path="/reservations" element={
+                  <ProtectedRoute>
+                    <MyReservations />
+                  </ProtectedRoute>
+                } />
+                <Route path="/profile" element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                } />
+
+                {/* PRODAVAC / ADMIN RUTE */}
+                <Route path="/dashboard" element={
+                  <ProtectedRoute roles={["Seller", "Admin"]}>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/dashboard/products/add" element={
+                  <ProtectedRoute roles={["Seller", "Admin"]}>
+                    <ProductForm />
+                  </ProtectedRoute>
+                } />
+                <Route path="/dashboard/products/edit/:id" element={
+                  <ProtectedRoute roles={["Seller", "Admin"]}>
+                    <ProductForm />
+                  </ProtectedRoute>
+                } />
+
               </Routes>
             </main>
             <Footer />
